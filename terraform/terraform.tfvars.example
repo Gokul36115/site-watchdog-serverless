@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars (which is git-ignored) and fill in your values.
+sites = [
+  "https://github.com",
+  "https://www.google.com",
+  "https://expired.badssl.com", # test site with an expired certificate: proves alerts work
+]
+
+telegram_chat_id = "<your Telegram chat ID>"
+
+auth0_domain     = "<your-tenant>.us.auth0.com"
+auth0_audience   = "https://site-watchdog-api"
+dashboard_origin = "https://<your-github-user>.github.io"
