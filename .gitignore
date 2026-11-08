@@ -9,3 +9,9 @@ __pycache__/
 terraform.tfvars
 build/
 out.json
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+build/
