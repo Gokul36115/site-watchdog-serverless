@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Site Watchdog Dashboard</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; }
+    main { max-width: 900px; margin: 40px auto; padding: 0 20px; }
+    h1 { margin-bottom: 4px; }
+    .sub { color: #94a3b8; margin-top: 0; }
+    #bar { display: flex; gap: 10px; align-items: center; margin: 20px 0; }
+    button { background: #3b82f6; color: white; border: 0; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #2563eb; }
+    #who { color: #94a3b8; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid #1e293b; }
+    th { color: #94a3b8; font-weight: 600; }
+    tr.ok td:last-child { color: #4ade80; }
+    tr.fail td:last-child { color: #f87171; }
+    details { margin-top: 24px; color: #94a3b8; }
+    pre { background: #1e293b; padding: 12px; border-radius: 6px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Site Watchdog</h1>
+  <p class="sub">Uptime and TLS certificate status &middot; protected by Auth0 SSO</p>
+
+  <div id="bar">
+    <button id="login">Log in</button>
+    <button id="refresh" hidden>Refresh</button>
+    <button id="logout" hidden>Log out</button>
+    <span id="who"></span>
+  </div>
+  <p id="msg"></p>
+
+  <table id="results" hidden>
+    <thead><tr><th>Site</th><th>HTTP</th><th>Response</th><th>Certificate</th><th>Result</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <details id="tokenBox" hidden>
+    <summary>Show my access token claims (JWT)</summary>
+    <pre id="claims"></pre>
+  </details>
+</main>
+
+<script src="https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js"></script>
+<script>
+  // Public values only: nothing here is a secret. Security = the token check in API Gateway.
+  const CONFIG = {
+    domain:   "dev-j1ms0mre1ohknwqz.us.auth0.com",
+    clientId: "Vvrui71tM4OoNTQfbjx1lr1Cvn2cDWVe",
+    audience: "https://site-watchdog-api",
+    apiUrl:   "https://yk8hycstw4.execute-api.ap-south-1.amazonaws.com/status",
+  };
+  const $ = (id) => document.getElementById(id);
+  const HERE = window.location.origin + window.location.pathname;
+  let client;
+
+  async function start() {
+    client = await auth0.createAuth0Client({
+      domain: CONFIG.domain,
+      clientId: CONFIG.clientId,
+      authorizationParams: { redirect_uri: HERE, audience: CONFIG.audience },
+    });
+
+    // Coming back from the Auth0 login page? The URL then has ?code=...&state=...
+    if (location.search.includes("code=") && location.search.includes("state=")) {
+      await client.handleRedirectCallback();          // swaps the one-time code for tokens (PKCE)
+      history.replaceState({}, document.title, location.pathname);
+    }
+
+    if (await client.isAuthenticated()) {
+      const user = await client.getUser();
+      $("who").textContent = `Signed in as ${user.email || user.name}`;
+      $("login").hidden = true;
+      $("refresh").hidden = false;
+      $("logout").hidden = false;
+      await loadStatus();
+    } else {
+      $("msg").textContent = "Please log in to see the status.";
+    }
+  }
+
+  async function loadStatus() {
+    $("msg").textContent = "Checking sites...";
+    try {
+      const token = await client.getTokenSilently();   // access token for https://site-watchdog-api
+      showClaims(token);
+      const res = await fetch(CONFIG.apiUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(`API returned ${res.status}`);
+      const data = await res.json();
+      renderTable(data.results);
+      $("msg").textContent = `Last checked: ${data.checked_at}`;
+    } catch (err) {
+      $("msg").textContent = `Error: ${err.message}`;
+    }
+  }
+
+  function renderTable(results) {
+    const tbody = $("results").querySelector("tbody");
+    tbody.replaceChildren();
+    for (const r of results) {
+      const healthy = r.problems.length === 0;
+      const tr = document.createElement("tr");
+      tr.className = healthy ? "ok" : "fail";
+      const cells = [
+        r.host,
+        r.status ?? "-",
+        r.ms != null ? `${r.ms} ms` : "-",
+        r.cert_days != null ? `${r.cert_days} days left` : "-",
+        healthy ? "Healthy" : r.problems.join(", "),
+      ];
+      for (const value of cells) {
+        const td = document.createElement("td");
+        td.textContent = value;                        // textContent, never innerHTML: no HTML injection
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    $("results").hidden = false;
+  }
+
+  // Decode the JWT payload (middle part) just to SHOW it. Verification happens in API Gateway.
+  function showClaims(token) {
+    const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const p = JSON.parse(atob(part));
+    const view = {
+      iss: p.iss,
+      aud: p.aud,
+      sub: p.sub,
+      issued: new Date(p.iat * 1000).toISOString(),
+      expires: new Date(p.exp * 1000).toISOString(),
+    };
+    $("claims").textContent = JSON.stringify(view, null, 2);
+    $("tokenBox").hidden = false;
+  }
+
+  $("login").onclick = () => client.loginWithRedirect();
+  $("refresh").onclick = loadStatus;
+  $("logout").onclick = () => client.logout({ logoutParams: { returnTo: HERE } });
+
+  start().catch((err) => { $("msg").textContent = `Error: ${err.message}`; });
+</script>
+</body>
+</html>
