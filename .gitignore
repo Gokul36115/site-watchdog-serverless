@@ -2,3 +2,10 @@
 __pycache__/
 .env
 *.zip
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+build/
+out.json
