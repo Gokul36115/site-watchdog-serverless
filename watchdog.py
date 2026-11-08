@@ -1,3 +1,4 @@
+import json
 import os
 import socket
 import ssl
@@ -5,6 +6,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 # ---- Settings (from environment variables, with safe defaults) ----
@@ -68,7 +70,7 @@ def send_telegram(text):
 
 
 def check_site(url):
-    """Run all checks for one site. Return a list of problems (empty = healthy)."""
+    """Run all checks for one site. Return a dict with every detail."""
     host = urlparse(url).hostname
     status, ms, error = check_http(url)
     days = cert_days_left(host)
@@ -85,16 +87,16 @@ def check_site(url):
         problems.append(f"CERT expires in {days} days")
 
     print(f"{'FAIL' if problems else 'OK  '}  {host:45} status={status}  time={ms} ms  cert={days} days  {problems}")
-    return problems
+    return {"host": host, "status": status, "ms": ms, "cert_days": days, "problems": problems}
 
 
 def run_checks():
     """Check every site; send ONE Telegram message listing all problems."""
     alerts = []
     for site in SITES:
-        problems = check_site(site)
-        if problems:
-            alerts.append(f"❌ {urlparse(site).hostname}: {', '.join(problems)}")
+        result = check_site(site)
+        if result["problems"]:
+            alerts.append(f"❌ {result['host']}: {', '.join(result['problems'])}")
 
     if alerts:
         send_telegram("🚨 Site Watchdog alert\n\n" + "\n".join(alerts))
@@ -105,7 +107,25 @@ def run_checks():
 
 
 def lambda_handler(event, context):
-    """AWS Lambda calls this function on every scheduled run."""
+    """Called two ways: by API Gateway (dashboard) or by the EventBridge schedule."""
+    request = event.get("requestContext", {})
+
+    # 1) Dashboard call through API Gateway: the JWT was already verified by the authorizer
+    if "http" in request:
+        claims = request.get("authorizer", {}).get("jwt", {}).get("claims", {})
+        print(f"Dashboard request by user {claims.get('sub')}")
+        results = [check_site(site) for site in SITES]
+        body = {
+            "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "results": results,
+        }
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(body),
+        }
+
+    # 2) Scheduled run: check and alert on Telegram
     alerts = run_checks()
     return {"checked": len(SITES), "problems": len(alerts)}
 
