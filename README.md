@@ -37,22 +37,7 @@
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph AWS["AWS · ap-south-1 (Terraform)"]
-        EB["EventBridge<br/>rate(15 minutes)"] --> L["Lambda<br/>watchdog.py · Python 3.12"]
-        APIGW["API Gateway HTTP API<br/>GET /status + JWT authorizer"] --> L
-        L --> SSM["SSM Parameter Store<br/>bot token · SecureString"]
-        L --> CW["CloudWatch Logs"]
-    end
-    L --> SITES["Monitored websites<br/>HTTP + TLS checks"]
-    L --> TG["Telegram Bot API<br/>alerts to my phone"]
-    USER["Browser"] --> GH["GitHub Pages<br/>docs/index.html"]
-    GH -- "1. login: OIDC + PKCE" --> A0["Auth0 (Okta)<br/>identity provider"]
-    A0 -- "2. access token (JWT)" --> GH
-    GH -- "3. GET /status · Bearer token" --> APIGW
-    APIGW -. "verifies signature via JWKS" .-> A0
-```
+![Architecture](docs/architecture.png)
 
 Three places, three jobs:
 
